@@ -32,7 +32,6 @@ class MyBot:
         m_id = message.message_id
         text = message.text
 
-
         await self.dp.bot.send_message(
             chat_id=chat,
             text=self.db.start_message(method="get")
