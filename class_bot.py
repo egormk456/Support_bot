@@ -348,6 +348,10 @@ class MyBot:
         text = message.text
 
         self.db.start_message(text=text, method="save")
+        self.full_commands = self.db.get_commands_list()
+        self.dp.register_message_handler(callback=self.commands, commands=self.full_commands)
+        self.dp.register_message_handler(callback=self.start_handler, commands=["start"], state="*")
+
         await self.dp.bot.send_message(
             chat_id=chat,
             text="Стартовое сообщение успешно изменено"
@@ -362,7 +366,7 @@ class MyBot:
         if text in commands_list:
             self.db.delete_command(command=text)
             self.full_commands = self.db.get_commands_list()
-            print(message.text, self.full_commands)
+            #print(message.text, self.full_commands)
             self.dp.register_message_handler(callback=self.commands, commands=self.full_commands)
 
             await self.dp.bot.send_message(
