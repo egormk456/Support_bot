@@ -6,12 +6,13 @@ from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.utils.exceptions import BotBlocked
 
 from utils.db_api.database import Database
+from utils.db_api.funnel_db import FunnelDatabase
 from markups.admin_markup import admin_markup
-from markups.back_to_admin_markup import back_to_admin_markup
+from markups.back_markups import back_to_admin_markup
 
 from handlers.bot_states import BotStates
 from aiogram.utils.exceptions import BadRequest
-
+from datetime import datetime
 
 
 class MyBot:
@@ -21,6 +22,7 @@ class MyBot:
         self.bot = Bot(token=token)
         self.dp = Dispatcher(self.bot, storage=memory)
         self.db = Database(name=database_name)
+        self.funnel_db = FunnelDatabase(name="funnels.db")
 
         self.chat_link = self.db.get_chat_link(bot_token=self.bot_token)
         self.group_id = self.db.get_group_id(bot_token=self.bot_token)
@@ -34,6 +36,18 @@ class MyBot:
         tg_id = message.from_user.id
         chat = message.chat.id
         username = message.from_user.username
+        text = message.text
+        funnel_text = message.html_text
+
+        self.trigger = self.funnel_db.get_trigger(token=self.bot_token)
+        self.funnel_users = self.funnel_db.get_users(token=self.bot_token)
+        self.funnel_users = [user[0] for user in self.funnel_users]
+
+        if funnel_text is not None and funnel_text[0] == "/":
+            funnel_text = funnel_text[1:]
+
+        if self.trigger is not None and tg_id not in self.funnel_users and self.trigger.lower() == funnel_text.lower():
+            self.funnel_db.add_or_update_user(token=self.bot_token, tg_id=tg_id, trigger_time=f"{datetime.now().hour} {datetime.now().day}")
 
         await self.dp.bot.send_message(
             chat_id=chat,
@@ -58,16 +72,28 @@ class MyBot:
     async def text_handler(self, message: Message, state: FSMContext):
         tg_id = message.from_user.id
         m_id = message.message_id
-        text = message.text
+        text = message.html_text
         chat_type = message.chat.type
-        #print(self.full_commands)
+        funnel_text = message.html_text
+
+        self.trigger = self.funnel_db.get_trigger(token=self.bot_token)
+        self.funnel_users = self.funnel_db.get_users(token=self.bot_token)
+        self.funnel_users = [user[0] for user in self.funnel_users]
+
+        if funnel_text is not None and funnel_text[0] == "/":
+            funnel_text = funnel_text[1:]
+
+        if self.trigger is not None and tg_id not in self.funnel_users and self.trigger.lower() == funnel_text.lower():
+            self.funnel_db.add_or_update_user(token=self.bot_token, tg_id=tg_id,
+                                              trigger_time=f"{datetime.now().hour} {datetime.now().day}")
+
         if message.chat.id == self.group_id and text != "/set_group":
             await self.admin_message_handler(message=message)
 
         elif text is not None and text[0] == "/" and text[1:] in self.full_commands:
             await self.commands(message=message, state=state)
 
-        if chat_type == "private":
+        elif chat_type == "private":
             try:
                 message_to_chat = await self.dp.bot.copy_message(
                     chat_id=self.group_id,
@@ -103,10 +129,32 @@ class MyBot:
                 )
 
     async def commands(self, message: Message, state: FSMContext):
-        chat = message.chat.id
+        tg_id = message.from_user.id
+        m_id = message.message_id
         commands_dict = self.db.get_commands_with_descriptions(bot_token=self.bot_token)
+        funnel_text = message.html_text
+
+        self.trigger = self.funnel_db.get_trigger(token=self.bot_token)
+        self.funnel_users = self.funnel_db.get_users(token=self.bot_token)
+        self.funnel_users = [user[0] for user in self.funnel_users]
+
+        if funnel_text is not None and funnel_text[0] == "/":
+            funnel_text = funnel_text[1:]
+
+        if self.trigger is not None and tg_id not in self.funnel_users and self.trigger.lower() == funnel_text.lower():
+            self.funnel_db.add_or_update_user(token=self.bot_token, tg_id=tg_id,
+                                              trigger_time=f"{datetime.now().hour} {datetime.now().day}")
+
+        message_to_chat = await self.dp.bot.copy_message(
+            chat_id=self.group_id,
+            from_chat_id=tg_id,
+            message_id=m_id,
+            reply_to_message_id=self.db.get_post_id(tg_id=tg_id, bot_token=self.bot_token)
+        )
+
+        self.db.add_user_message(tg_id=tg_id, message_id=message_to_chat.message_id, bot_token=self.bot_token)
         await self.dp.bot.send_message(
-            chat_id=chat,
+            chat_id=tg_id,
             text=commands_dict[message.text[1:]],
             parse_mode="html",
         )

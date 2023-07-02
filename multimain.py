@@ -18,6 +18,8 @@ def bot_init(event_loop, token):
         pass
     except TypeError:
         pass
+    except Exception:
+        pass
 
 
 async def scheduler():
@@ -45,14 +47,13 @@ async def starting_bots():
     # print(tokens)
 
     if tokens is not None:
-        for token in tokens:  # тут можешь реализовать приемник токенов извне
+        for token in tokens:
             if token not in used_tokens:
                 used_tokens.append(token)
                 bot_init(event_loop, token)
 
 
 if __name__ == '__main__':
-    #event_loop.run_forever()
     while True:
         event_loop.run_until_complete(starting_bots())
 

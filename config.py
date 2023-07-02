@@ -1,4 +1,4 @@
-token = "5915752576:AAGCmfIt8icSRWZJl7EjJyWtJIZjapKpgG4" #""5684427805:AAG8uTXj6XpxYmAnIZawiHPNZTGmrscmV5A"
+token = "5915752576:AAGCmfIt8icSRWZJl7EjJyWtJIZjapKpgG4"
 
 chat_link = "@jojojopa3000"#-1001593278095
 
