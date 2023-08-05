@@ -1,11 +1,15 @@
 from sqlite3 import connect
 from typing import List
+import os
+from utils.usefull_functions.opened_file import open_files
 
 
 class Database:
     def __init__(self, name):
         self.connection = connect(name)
         self.cursor = self.connection.cursor()
+
+        self.funnel_connection = connect("funnels.db")
 
         self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS users_posts(
@@ -53,9 +57,16 @@ class Database:
         self.cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS commands(
-            title TEXT PRIMARY KEY,
+            bot_token TEXT,
+            title TEXT,
             description TEXT,
-            bot_token TEXT
+            audio BLOB,
+            photo BLOB,
+            video BLOB,
+            video_note BLOB,
+            document BLOB,
+            markup_text TEXT,
+            application_name TEXT
             )"""
         )
 
@@ -63,32 +74,61 @@ class Database:
             """
             CREATE TABLE IF NOT EXISTS start_message(
             bot_token TEXT PRIMARY KEY,
-            greeting TEXT
+            greeting TEXT,
+            audio BLOB,
+            photo BLOB,
+            video BLOB,
+            video_note BLOB,
+            document BLOB,
+            markup_text TEXT,
+            application_name TEXT
             );
+            """
+        )
+
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS invites_links(
+                token TEXT,
+                name TEXT,
+                invite_link_number INTEGER,
+                people_from_link INTEGER
+            )
             """
         )
         self.connection.commit()
 
-    def start_message(self, method: str, bot_token: str, text=None):
+    def start_message(self, method: str, bot_token: str, text=None, audio_name=None,
+                      photo_name=None, video_name=None, video_note_name=None, document_name=None,
+                      markup_text="0", application_name=None):
+
         if method == "save":
+            audio_reader, photo_reader, video_reader, video_note_reader, document_reader = open_files(
+                audio_name, photo_name, video_name, video_note_name, document_name
+            )
+
+            info = (bot_token, text, audio_reader, photo_reader, video_reader, video_note_reader, document_reader, markup_text, application_name)
+
             self.cursor.execute(
                 f"""
                 INSERT OR REPLACE INTO start_message
-                (bot_token, greeting)
-                VALUES('{bot_token}', '{text}');
-                """
+                (bot_token, greeting, audio, photo, video, video_note, document, markup_text, application_name)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?);
+                """,
+                info
             )
+
             self.connection.commit()
 
         elif method == "get":
             mess = self.cursor.execute(
                 f"""
-                SELECT greeting FROM start_message
+                SELECT greeting, audio, photo, video, video_note, document, markup_text, application_name FROM start_message
                 WHERE bot_token='{bot_token}'
                 """
             ).fetchone()
             self.connection.commit()
-            return mess[0]
+            return mess
 
     def update_user_info(self, tg_id: int, bot_token: str, bot_blocked: int) -> None:
         self.cursor.execute(
@@ -120,16 +160,45 @@ class Database:
         )
         self.connection.commit()
 
-    def add_command_with_description(self, title: str, description: str, bot_token: str):
+    def add_command_with_description(self, title: str, bot_token: str, description=None, audio_name=None, photo_name=None, video_note_name=None, video_name=None, document_name=None,
+                                     markup_text="0", application_name=None):
         title = title.lower()
+        commands_list = self.get_commands_list(bot_token=bot_token)
+        print(title, commands_list, title in commands_list)
 
-        self.cursor.execute(
-            f"""
-            INSERT OR REPLACE INTO commands
-            (title, description, bot_token)
-            VALUES ('{title}', '{description}', '{bot_token}');
-            """
+        audio_reader, photo_reader, video_reader, video_note_reader, document_reader = open_files(
+            audio_name, photo_name, video_name, video_note_name, document_name
         )
+
+        info = (title, description, audio_reader, photo_reader, video_reader, video_note_reader, markup_text, application_name)
+        if title in commands_list:
+            self.cursor.execute(
+                f"""
+                UPDATE commands
+                SET title=?, 
+                description=?,
+                audio=?,
+                photo=?,
+                video=?,
+                video_note=?,
+                markup_text=?,
+                application_name=?
+                WHERE bot_token='{bot_token}'
+                AND title='{title}'
+                """,
+                info
+            )
+
+        else:
+            self.cursor.execute(
+                f"""
+                INSERT OR REPLACE INTO commands
+                (title, description, bot_token, audio, photo, video, video_note, document, markup_text, application_name)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                """,
+                (title, description, bot_token, audio_reader, photo_reader, video_reader, video_note_reader, document_reader, markup_text, application_name)
+            )
+
         self.connection.commit()
 
     def add_bot(self, tg_id: int, bot_token: str) -> None:
@@ -230,24 +299,26 @@ class Database:
         )
 
     def get_commands_list(self, bot_token: str):
-        commands = [title[0] for title in
-                    self.cursor.execute(
+        commands = self.cursor.execute(
                         f"""
                         SELECT title FROM commands
                         WHERE bot_token='{bot_token}'
                         """
                     ).fetchall()
-                    ]
 
         self.connection.commit()
-        return commands
+
+        if commands is not None:
+            commands = [title[0] for title in commands]
+            return commands
+        return None
 
     def get_commands_with_descriptions(self, bot_token: str):
         commands_dict = {
-            response[0]: response[1] for response in
+            response[0]: response[1:] for response in
             self.cursor.execute(
                 f"""
-                SELECT title, description FROM commands
+                SELECT title, description, audio, photo, video, video_note, document, markup_text, application_name FROM commands
                 WHERE bot_token='{bot_token}'
                 """
             ).fetchall()
@@ -265,6 +336,18 @@ class Database:
         )
         self.connection.commit()
 
+    def update_command_name(self, bot_token: str, prev_name: str, new_name: str) -> None:
+        self.cursor.execute(
+            f"""
+            UPDATE commands
+            SET title='{new_name}'
+            WHERE bot_token='{bot_token}'
+            AND title='{prev_name}'
+            """
+        )
+        self.connection.commit()
+
+    # Настройки бота
     def get_chat_link(self, bot_token: str):
         chat_link = self.cursor.execute(
             f"""
@@ -326,3 +409,129 @@ class Database:
         if tokens is not None and len(tokens) > 0:
             tokens = [token[0] for token in tokens]
             return tokens
+
+    def delete_bot(self, token: str):
+        tables_list = ["users_posts", "bots_chats", "users_messages", "bots", "statistics", "commands", "start_message", "invite_links"]
+
+        for name in tables_list:
+            self.cursor.execute(
+                f"""
+                DELETE FROM {name}
+                WHERE bot_token='{token}'
+                """
+            )
+
+            self.connection.commit()
+
+
+    # Пригласительные ссылки
+    def create_invite_link(self, token: str, name: str):
+        link_number = self.get_links_amount(token=token)
+        self.cursor.execute(
+            f"""
+            INSERT INTO invites_links
+            (token, name, invite_link_number, people_from_link)
+            VALUES
+            ('{token}', '{name}', {link_number + 1}, 0);
+            """
+        )
+
+        self.connection.commit()
+        return link_number + 1
+
+    def get_links_amount(self, token):
+        links = self.cursor.execute(
+            f"""
+            SELECT invite_link_number FROM invites_links
+            WHERE token='{token}'
+            """
+        ).fetchall()
+
+        self.connection.commit()
+
+        if links is None:
+            return 0
+        return len(links)
+
+    def get_links_info(self, token: str):
+        links_info = self.cursor.execute(
+            f"""
+            SELECT name, invite_link_number, people_from_link FROM invites_links
+            WHERE token='{token}'
+            """
+        ).fetchall()
+
+        if links_info is None:
+            return None
+
+        #links_info = #[? for name, num, people in links_info]
+        return sorted(links_info, key=lambda x: x[1])
+
+    def get_link_info(self, token: str, link_num: int):
+        link_info = self.cursor.execute(
+            f"""
+            SELECT name, people_from_link FROM invites_links
+            WHERE token='{token}'
+            AND invite_link_number={link_num}
+            """
+        ).fetchone()
+
+        if link_info is None:
+            return None
+        return link_info
+
+    def update_link_views(self, token: str, link_num: int):
+        name, people_amount = self.get_link_info(token=token, link_num=link_num)
+
+        self.cursor.execute(
+            f"""
+            UPDATE invites_links
+            SET people_from_link={people_amount + 1}
+            WHERE token='{token}'
+            AND invite_link_number={link_num}
+            """
+        )
+
+        self.connection.commit()
+
+    def delete_invite_link(self, token: str, link_num: int):
+        self.cursor.execute(
+            f"""
+            DELETE FROM invites_links
+            WHERE token='{token}'
+            AND invite_link_number={link_num}
+            """
+        )
+
+        self.connection.commit()
+
+    def get_applications_names_list(self, token: str):
+        lst_commands = self.cursor.execute(
+                    f"""
+                    SELECT application_name FROM commands
+                    WHERE bot_token='{token}'
+                    """
+               ).fetchall()
+
+
+        lst_steps = self.funnel_connection.cursor().execute(
+                    f"""
+                    SELECT application_name FROM steps
+                    WHERE token='{token}'
+                    """
+               ).fetchall()
+
+
+        lst_start = self.cursor.execute(
+                    f"""
+                    SELECT application_name FROM start_message
+                    WHERE bot_token='{token}'
+                    """
+               ).fetchall()
+
+        lst_commands.extend(lst_steps)
+        lst_commands.extend(lst_start)
+
+        lst_commands = [elem[0] for elem in lst_commands if elem[0] is not None]
+
+        return lst_commands

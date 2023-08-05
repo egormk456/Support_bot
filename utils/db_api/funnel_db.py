@@ -1,4 +1,5 @@
 from sqlite3 import connect
+from utils.usefull_functions.opened_file import open_files
 
 
 class FunnelDatabase:
@@ -42,8 +43,15 @@ class FunnelDatabase:
                 tg_id INTEGER,
                 token TEXT,
                 step TEXT,
-                hours INTEGER,
-                step_number INTEGER
+                minutes INTEGER,
+                step_number INTEGER,
+                audio BLOB,
+                photo BLOB,
+                video BLOB,
+                video_note BLOB,
+                document BLOB,
+                markup_text TEXT, 
+                application_name TEXT
             )
             """
         )
@@ -147,18 +155,28 @@ class FunnelDatabase:
 
         self.connection.commit()
 
-    def add_step(self, tg_id: int, token: str, step: str, hours: int):
+    def add_step(self, tg_id: int, token: str, step: str, minutes: int, audio_name=None, photo_name=None, video_note_name=None, video_name=None, document_name=None,
+                 markup_text="0", application_name=None):
         step_number = self.get_steps_length(token=token)
+
+        audio_reader, photo_reader, video_reader, video_note_reader, document_reader = open_files(
+            audio_name, photo_name, video_name, video_note_name, document_name
+        )
+
+        info = (tg_id, token, step, minutes, step_number + 1, audio_reader, photo_reader, video_reader, video_note_reader, document_reader, markup_text, application_name)
+        #print(info)
         self.cursor.execute(
             f"""
             INSERT OR REPLACE INTO steps
-            (tg_id, token, step, hours, step_number)
+            (tg_id, token, step, minutes, step_number, audio, photo, video, video_note, document, markup_text, application_name)
             VALUES
-            ({tg_id}, '{token}', '{step}', {hours}, {step_number + 1});
-            """
+            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """,
+            info
         )
 
         self.connection.commit()
+        self.edit_steps_time(token=token, tg_id=tg_id, time=minutes)
 
     def get_steps_length(self, token):
         steps = self.cursor.execute(
@@ -189,7 +207,7 @@ class FunnelDatabase:
     def get_steps_info(self, token: str):
         steps_info = self.cursor.execute(
             f"""
-            SELECT step, hours, step_number FROM steps
+            SELECT step, minutes, step_number, audio, photo, video, video_note, document, markup_text, application_name FROM steps
             WHERE token='{token}'
             """
         ).fetchall()
@@ -199,19 +217,19 @@ class FunnelDatabase:
             return steps_info
         return None
 
-    def get_step_text_by_number(self, token: str, step_number: int):
-        step_text = self.cursor.execute(
+    def get_step_by_number(self, token: str, step_number: int):
+        step_info = self.cursor.execute(
             f"""
-            SELECT step FROM steps
+            SELECT step, audio, photo, video, video_note, document, markup_text, application_name FROM steps
             WHERE step_number={step_number}
             AND token='{token}'
             """
         ).fetchone()
         self.connection.commit()
-
-        if step_text is None:
+        #print(step_number, step_info)
+        if step_info is None or any(step_info) is False:
             return None
-        return step_text[0]
+        return step_info
 
     def get_steps(self, token: str):
         steps = self.cursor.execute(
@@ -243,8 +261,9 @@ class FunnelDatabase:
 
 
     def minus_step_number(self, token: str, step_number: int):
-        step = self.get_step_text_by_number(token=token, step_number=step_number + 1)
+        step = self.get_step_by_number(token=token, step_number=step_number + 1)
         step_numberr = step_number + 1
+        print("minus number", token, step)
         if step is not None:
             while True:
                 if step is None:
@@ -255,12 +274,11 @@ class FunnelDatabase:
                     UPDATE steps
                     SET step_number={step_numberr - 1}
                     WHERE token='{token}'
-                    AND step='{step}'
                     """
                 )
                 step_numberr += 1
                 self.connection.commit()
-                step = self.get_step_text_by_number(token=token, step_number=step_numberr)
+                step = self.get_step_by_number(token=token, step_number=step_numberr)
 
     def get_users(self, token: str):
         users = self.cursor.execute(
@@ -291,3 +309,79 @@ class FunnelDatabase:
                         """
                     )
                     self.connection.commit()
+
+    def get_step_time(self, token: str, step_number: int):
+        time = self.cursor.execute(
+            f"""
+            SELECT minutes FROM steps
+            WHERE token='{token}'
+            AND step_number={step_number}
+            """
+        ).fetchone()
+
+        time = time[0]
+
+        hours = time // 60
+        minutes = time % 60
+
+        return hours, minutes
+
+    def edit_steps_time(self, token: str, tg_id: int, time: int):
+        step_info = self.get_steps_info(token=token)
+        #print(step_info)
+        sorted_info = sorted(step_info, key=lambda x: x[1])
+        #print(sorted_info)
+
+        self.cursor.execute(
+            f"""
+            DELETE FROM steps
+            WHERE token='{token}'
+            """
+        )
+
+        num = 1
+        for elem in sorted_info:
+            if elem[1] == time:
+                self.add_user_number(token=token, new_step_number=num)
+                break
+            num += 1
+
+        count = 1
+        for step, minutes, step_number, audio, photo, video, video_note, document, markup_text, application_name in sorted_info:
+            info = (tg_id, token, step, minutes, count, audio, photo, video, video_note, document, markup_text, application_name)
+            print(info)
+
+            self.cursor.execute(
+                f"""
+                INSERT INTO steps
+                (tg_id, token, step, minutes, step_number, audio, photo, video, video_note, document, markup_text, application_name)
+                VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                """,
+                info
+            )
+            count += 1
+
+            self.connection.commit()
+
+    def add_user_number(self, token: str, new_step_number: int):
+        users = self.get_users(token=token)
+        users = [user[0] for user in users]
+
+        for tg_id in users:
+            step_number, trigger_time = self.get_user_step_number_and_time(tg_id=tg_id, token=token)
+            if step_number != new_step_number:
+                self.add_or_update_user(token=token, tg_id=tg_id, step_number=step_number + 1, trigger_time=trigger_time)
+
+    def delete_bot(self, token: str):
+        tables_list = ["funnels", "users_steps", "triggers", "steps"]
+
+        for name in tables_list:
+            self.cursor.execute(
+                f"""
+                DELETE FROM {name}
+                WHERE token='{token}'
+                """
+            )
+
+            self.connection.commit()

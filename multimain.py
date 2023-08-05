@@ -2,7 +2,7 @@ import asyncio
 from class_bot import MyBot
 from utils.db_api.database import Database
 import aioschedule
-event_loop = asyncio.get_event_loop()
+
 used_tokens = []
 
 
@@ -54,6 +54,7 @@ async def starting_bots():
 
 
 if __name__ == '__main__':
+    event_loop = asyncio.get_event_loop()
     while True:
         event_loop.run_until_complete(starting_bots())
 
