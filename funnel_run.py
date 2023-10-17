@@ -31,24 +31,30 @@ async def funnel_mailing():
                 user_trigger_minutes, user_trigger_day = user_trigger_time.split(" ")
 
                 if steps_info is not None:
-                    for step, minutes, step_number, audio, photo, video, video_note, document, markup_text, application_name in steps_info:
+                    for step, minutes, step_number, audio, photo, video, video_note, document, document_name, markup_text, application_text, application_button, application_name in steps_info:
                         user_trigger_minutes = int(user_trigger_minutes)
                         user_trigger_day = int(user_trigger_day)
 
                         now_minutes = datetime.now().hour * 60 + datetime.now().minute
                         tt = user_trigger_minutes + minutes
-                        if tt > 3600:
-                            tt = tt - 3600
+                        if tt >= 1440:
+                            tt = tt - 1440
                             user_trigger_day += 1
 
-                        if (tt <= now_minutes and user_trigger_day == now_day and step_number == user_step_number)\
-                                or (now_day > user_trigger_day and step_number == user_step_number):
+
+                        # print(f"{tt =}, {now_minutes=}, {user_trigger_day =}, {now_day =}, {step_number =}, {user_step_number =}, {token =}")
+                        if (tt <= now_minutes and user_trigger_day <= now_day and step_number == user_step_number):
+                                # or (now_day <= user_trigger_day and step_number == user_step_number):
 
                             markup = InlineKeyboardMarkup()
+
+                            if application_button is None:
+                                application_button = "Оставить заявку"
+
                             if application_name is not None:
                                 markup.add(
                                     InlineKeyboardButton(
-                                        text="Оставить заявку", callback_data=application_name
+                                        text=application_button, callback_data=application_name
                                     )
                                 )
 
@@ -65,6 +71,7 @@ async def funnel_mailing():
                                 video=video,
                                 video_note=video_note,
                                 document=document,
+                                document_name=document_name,
                                 markup=markup
                             )
 

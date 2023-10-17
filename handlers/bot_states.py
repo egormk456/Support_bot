@@ -25,6 +25,8 @@ class BotStates(StatesGroup):
     add_markup = State()
     add_application = State()
     add_application_name = State()
+    add_application_text = State()
+    add_application_button = State()
 
 
 class AddBotStates(StatesGroup):

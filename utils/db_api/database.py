@@ -65,7 +65,10 @@ class Database:
             video BLOB,
             video_note BLOB,
             document BLOB,
+            document_name TEXT,
             markup_text TEXT,
+            application_text TEXT,
+            application_button TEXT,
             application_name TEXT
             )"""
         )
@@ -80,6 +83,7 @@ class Database:
             video BLOB,
             video_note BLOB,
             document BLOB,
+            document_name TEXT,
             markup_text TEXT,
             application_name TEXT
             );
@@ -89,7 +93,7 @@ class Database:
         self.cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS invites_links(
-                token TEXT,
+                bot_token TEXT,
                 name TEXT,
                 invite_link_number INTEGER,
                 people_from_link INTEGER
@@ -100,20 +104,22 @@ class Database:
 
     def start_message(self, method: str, bot_token: str, text=None, audio_name=None,
                       photo_name=None, video_name=None, video_note_name=None, document_name=None,
-                      markup_text="0", application_name=None):
+                      markup_text="0", application_text=None, application_button=None, application_name=None):
 
         if method == "save":
             audio_reader, photo_reader, video_reader, video_note_reader, document_reader = open_files(
                 audio_name, photo_name, video_name, video_note_name, document_name
             )
 
-            info = (bot_token, text, audio_reader, photo_reader, video_reader, video_note_reader, document_reader, markup_text, application_name)
+            if document_name is not None:
+                document_name = document_name[15:-4]
+            info = (bot_token, text, audio_reader, photo_reader, video_reader, video_note_reader, document_reader, document_name, markup_text, application_text, application_button, application_name)
 
             self.cursor.execute(
                 f"""
                 INSERT OR REPLACE INTO start_message
-                (bot_token, greeting, audio, photo, video, video_note, document, markup_text, application_name)
-                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?);
+                (bot_token, greeting, audio, photo, video, video_note, document, document_name, markup_text, application_text, application_button, application_name)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
                 info
             )
@@ -123,7 +129,7 @@ class Database:
         elif method == "get":
             mess = self.cursor.execute(
                 f"""
-                SELECT greeting, audio, photo, video, video_note, document, markup_text, application_name FROM start_message
+                SELECT greeting, audio, photo, video, video_note, document, document_name, markup_text, application_text, application_button, application_name FROM start_message
                 WHERE bot_token='{bot_token}'
                 """
             ).fetchone()
@@ -161,16 +167,17 @@ class Database:
         self.connection.commit()
 
     def add_command_with_description(self, title: str, bot_token: str, description=None, audio_name=None, photo_name=None, video_note_name=None, video_name=None, document_name=None,
-                                     markup_text="0", application_name=None):
+                                     markup_text="0", application_text=None, application_button=None, application_name=None):
         title = title.lower()
         commands_list = self.get_commands_list(bot_token=bot_token)
-        print(title, commands_list, title in commands_list)
+
 
         audio_reader, photo_reader, video_reader, video_note_reader, document_reader = open_files(
             audio_name, photo_name, video_name, video_note_name, document_name
         )
-
-        info = (title, description, audio_reader, photo_reader, video_reader, video_note_reader, markup_text, application_name)
+        if document_name is not None:
+            document_name = document_name[15:-4]
+        info = (title, description, audio_reader, photo_reader, video_reader, video_note_reader, document_reader, document_name, markup_text, application_text, application_button, application_name)
         if title in commands_list:
             self.cursor.execute(
                 f"""
@@ -181,7 +188,11 @@ class Database:
                 photo=?,
                 video=?,
                 video_note=?,
+                document=?,
+                document_name=?,
                 markup_text=?,
+                application_text=?,
+                application_button=?,
                 application_name=?
                 WHERE bot_token='{bot_token}'
                 AND title='{title}'
@@ -193,10 +204,11 @@ class Database:
             self.cursor.execute(
                 f"""
                 INSERT OR REPLACE INTO commands
-                (title, description, bot_token, audio, photo, video, video_note, document, markup_text, application_name)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                (title, description, bot_token, audio, photo, video, video_note, document, document_name, markup_text, application_text,
+            application_button, application_name)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
-                (title, description, bot_token, audio_reader, photo_reader, video_reader, video_note_reader, document_reader, markup_text, application_name)
+                (title, description, bot_token, audio_reader, photo_reader, video_reader, video_note_reader, document_reader, document_name, markup_text, application_text, application_button, application_name)
             )
 
         self.connection.commit()
@@ -318,7 +330,7 @@ class Database:
             response[0]: response[1:] for response in
             self.cursor.execute(
                 f"""
-                SELECT title, description, audio, photo, video, video_note, document, markup_text, application_name FROM commands
+                SELECT title, description, audio, photo, video, video_note, document, document_name, markup_text, application_text, application_button, application_name FROM commands
                 WHERE bot_token='{bot_token}'
                 """
             ).fetchall()
@@ -406,12 +418,14 @@ class Database:
 
             self.connection.commit()
 
+
         if tokens is not None and len(tokens) > 0:
             tokens = [token[0] for token in tokens]
             return tokens
+        return None
 
     def delete_bot(self, token: str):
-        tables_list = ["users_posts", "bots_chats", "users_messages", "bots", "statistics", "commands", "start_message", "invite_links"]
+        tables_list = ["users_posts", "bots_chats", "users_messages", "bots", "statistics", "commands", "start_message", "invites_links"]
 
         for name in tables_list:
             self.cursor.execute(
@@ -430,7 +444,7 @@ class Database:
         self.cursor.execute(
             f"""
             INSERT INTO invites_links
-            (token, name, invite_link_number, people_from_link)
+            (bot_token, name, invite_link_number, people_from_link)
             VALUES
             ('{token}', '{name}', {link_number + 1}, 0);
             """
@@ -443,7 +457,7 @@ class Database:
         links = self.cursor.execute(
             f"""
             SELECT invite_link_number FROM invites_links
-            WHERE token='{token}'
+            WHERE bot_token='{token}'
             """
         ).fetchall()
 
@@ -457,7 +471,7 @@ class Database:
         links_info = self.cursor.execute(
             f"""
             SELECT name, invite_link_number, people_from_link FROM invites_links
-            WHERE token='{token}'
+            WHERE bot_token='{token}'
             """
         ).fetchall()
 
@@ -471,7 +485,7 @@ class Database:
         link_info = self.cursor.execute(
             f"""
             SELECT name, people_from_link FROM invites_links
-            WHERE token='{token}'
+            WHERE bot_token='{token}'
             AND invite_link_number={link_num}
             """
         ).fetchone()
@@ -487,7 +501,7 @@ class Database:
             f"""
             UPDATE invites_links
             SET people_from_link={people_amount + 1}
-            WHERE token='{token}'
+            WHERE bot_token='{token}'
             AND invite_link_number={link_num}
             """
         )
@@ -498,7 +512,7 @@ class Database:
         self.cursor.execute(
             f"""
             DELETE FROM invites_links
-            WHERE token='{token}'
+            WHERE bot_token='{token}'
             AND invite_link_number={link_num}
             """
         )
@@ -535,3 +549,48 @@ class Database:
         lst_commands = [elem[0] for elem in lst_commands if elem[0] is not None]
 
         return lst_commands
+
+    def get_application_text(self, application_name, token):
+        lst_commands = self.cursor.execute(
+                    f"""
+                    SELECT application_text FROM commands
+                    WHERE bot_token='{token}'
+                    AND application_name='{application_name}'
+                    """
+               ).fetchall()
+
+
+        lst_steps = self.funnel_connection.cursor().execute(
+                    f"""
+                    SELECT application_text FROM steps
+                    WHERE token='{token}'
+                    AND application_name='{application_name}'
+                    """
+               ).fetchall()
+
+
+        lst_start = self.cursor.execute(
+                    f"""
+                    SELECT application_text FROM start_message
+                    WHERE bot_token='{token}'
+                    AND application_name='{application_name}'
+                    """
+               ).fetchall()
+
+        lst_commands.extend(lst_steps)
+        lst_commands.extend(lst_start)
+
+        lst_commands = [elem[0] for elem in lst_commands if elem[0] is not None]
+        return lst_commands[0]
+
+    def transfer_bot(self, tg_id, token):
+        self.cursor.execute(
+            f"""
+            UPDATE bots
+            SET tg_id={tg_id}
+            WHERE bot_token='{token}'
+            """
+        )
+
+        self.connection.commit()
+

@@ -19,9 +19,9 @@ def create_markup(markup_text, markup: InlineKeyboardMarkup, commands_list):
             status = "0"
             for elem in LWS:
                 try:
-                    text, url = elem.split("-")
+                    text, url = elem.split(" - ")
                 except ValueError:
-                    text, url = elem.split("–")
+                    text, url = elem.split(" – ")
 
                 text = text.strip()
                 url = url.strip()
@@ -33,7 +33,7 @@ def create_markup(markup_text, markup: InlineKeyboardMarkup, commands_list):
                 except Exception as e:
                     print(e)
 
-                if status == 200:
+                if status in [200, 403]:
                     magic_dict[url] = "url"
 
                 elif url in commands_list:
@@ -43,14 +43,14 @@ def create_markup(markup_text, markup: InlineKeyboardMarkup, commands_list):
                     magic_dict[url] = "/start"
 
             try:
-                text1, url1 = list(map(lambda x: x.strip(), LWS[0].split('-')))
+                text1, url1 = list(map(lambda x: x.strip(), LWS[0].split(' - ')))
             except ValueError:
-                text1, url1 = list(map(lambda x: x.strip(), LWS[0].split('–')))
+                text1, url1 = list(map(lambda x: x.strip(), LWS[0].split(' – ')))
 
             try:
-                text2, url2 = list(map(lambda x: x.strip(), LWS[1].split('-')))
+                text2, url2 = list(map(lambda x: x.strip(), LWS[1].split(' - ')))
             except ValueError:
-                text2, url2 = list(map(lambda x: x.strip(), LWS[1].split('–')))
+                text2, url2 = list(map(lambda x: x.strip(), LWS[1].split(' – ')))
 
             if magic_dict[url1] == "url" and magic_dict[url2] == "url":
                     markup.add(
@@ -113,11 +113,10 @@ def create_markup(markup_text, markup: InlineKeyboardMarkup, commands_list):
                 )
         else:
             LWS = row
-
             try:
-                text, url = LWS.split("-")
+                text, url = LWS.split(" - ")
             except ValueError:
-                text, url = LWS.split("–")
+                text, url = LWS.split(" – ")
                 
             text = text.strip()
             url = url.strip()
@@ -125,11 +124,13 @@ def create_markup(markup_text, markup: InlineKeyboardMarkup, commands_list):
             status = "0"
             try:
                 http_url = "https://" + url if "https://" not in url else url
+                print(url)
                 status = request("GET", http_url).status_code
+                print(status)
             except Exception as e:
                 print(e)
 
-            if status == 200:
+            if status in [200, 403]:
                 markup.add(
                     InlineKeyboardButton(
                         text=text,
@@ -152,6 +153,6 @@ def create_markup(markup_text, markup: InlineKeyboardMarkup, commands_list):
                         callback_data="/start"
                     )
                 )
-
+    print(markup)
     return markup
 

@@ -3,12 +3,13 @@ import os
 
 
 async def sending_function(
-        bot: Bot, chat_id, text, audio, photo, video, video_note, document, markup=None
+        bot: Bot, chat_id, text, audio, photo, video, video_note, document, document_name=None, markup=None
 ):
     print("Здесь бот")
     funnel_message = 0
     if photo is not None:
         try:
+            print(len(text))
             funnel_message = await bot.send_photo(
                 chat_id=chat_id,
                 caption=text,
@@ -17,7 +18,7 @@ async def sending_function(
                 reply_markup=markup,
 
             )
-            
+
         except Exception as e:
             print(e)
 
@@ -55,7 +56,10 @@ async def sending_function(
 
     elif document:
         try:
-            filename = f"files/document/document.pdf"
+            if document_name is None:
+                filename = f"files/document/document.pdf"
+            else:
+                filename = f"files/document/{document_name}.pdf"
             with open(filename, "wb") as pdf_file:
                 pdf_file.write(document)
 
@@ -63,6 +67,7 @@ async def sending_function(
                 funnel_message = await bot.send_document(
                     chat_id=chat_id,
                     document=file,
+                    thumb="AAMCAgADGQEAAiMhZNKAPpn3wnn75fqjwAfkF7mazDoAAgkxAAJL35lKyEI2dVwzvc8BAAdtAAMwBA",
                     caption=text,
                     parse_mode="html",
                     reply_markup=markup,
@@ -71,8 +76,6 @@ async def sending_function(
             os.remove(filename)
         except Exception as e:
             print(e)
-
-
 
     elif text is not None:
         try:

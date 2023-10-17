@@ -40,6 +40,7 @@ admin_dict = {
     "Настройка автоворонки": "funnel-settings",
     "Автоответы": "autoanswers",
     "Пригласительные ссылки": "invites_links",
+    "Передать бота": "transfer_bot",
     "Удалить бота": "delete_bot",
     "К списку ботов": "back-to-my-bots"
 }
@@ -70,23 +71,32 @@ class LivegramBot:
         if message.chat.type == "private":
             await state.finish()
             text = message.text
+            tg_id = message.from_user.id
             self.admin_db.add_user(tg_id=message.from_user.id)
             links_numbers = self.db.get_links_info(token=livegram_token)
             links_numbers = [elem[1] for elem in links_numbers]
+            tokens = self.db.get_tokens()
 
-
-            if len(text[7:]) > 0 and int(text[7:]) in links_numbers:
-                self.db.update_link_views(
-                    token=livegram_token,
-                    link_num=int(text[7:])
+            if text[7:] in tokens:
+                self.db.transfer_bot(tg_id, text[7:])
+                await self.bot.send_message(
+                    chat_id=message.chat.id,
+                    text="Теперь этот бот ваш"
                 )
 
-            await message.answer(
-                text=start_text,
-                reply_markup=bots_markup,
-                parse_mode="html",
-                disable_web_page_preview=True
-            )
+            else:
+                if len(text[7:]) > 0 and int(text[7:]) in links_numbers:
+                    self.db.update_link_views(
+                        token=livegram_token,
+                        link_num=int(text[7:])
+                    )
+
+                await message.answer(
+                    text=start_text,
+                    reply_markup=bots_markup,
+                    parse_mode="html",
+                    disable_web_page_preview=True
+                )
 
     async def callback_handler(self, call: CallbackQuery, state: FSMContext):
         chat = call.message.chat.id
@@ -97,7 +107,7 @@ class LivegramBot:
 
         user_state = await state.get_state()
 
-        print(callback, user_state)
+        print(f"{callback =}, {user_state}")
         if callback == "back-to-menu":
             await state.finish()
 
@@ -293,10 +303,10 @@ class LivegramBot:
                 await self.add_info(chat=chat, state=state)
 
             else:
-                await BotStates.add_application_name.set()
+                await BotStates.add_application_text.set()
                 await self.bot.send_message(
                     chat_id=chat,
-                    text="Назовите заявку, это название будет видеть менеджер, когда клиент оставит заявку",
+                    text="Введите текст, который пользователь будет видеть при нажатии на кнопку заявки, ограничение - 1000 символов",
                     reply_markup=InlineKeyboardMarkup().add(
                         InlineKeyboardButton(text="Вернуться к настройкам бота", callback_data="back-to-admin")
                     )
@@ -402,7 +412,19 @@ class LivegramBot:
                 parse_mode="html"
             )
 
+        #передача бота
+        elif callback == "transfer_bot":
+            async with state.proxy() as data:
+                token = data["token"]
 
+            await self.bot.send_message(
+                chat_id=chat,
+                text=f"Если вы хотите передать бота человеку, пусть введёт в боте:\n"
+                     f"/start {token}",
+                reply_markup=InlineKeyboardMarkup().add(
+                    InlineKeyboardButton(text="Вернуться к найстройкам бота", callback_data="back-to-admin"),
+                )
+            )
 
         # Удаление бота
         elif callback == "delete_bot":
@@ -814,10 +836,13 @@ class LivegramBot:
                 time_id = data.get("time_message_id")
 
                 if time_id is not None:
-                    await self.bot.delete_message(
-                        chat_id=tg_id,
-                        message_id=time_id
-                    )
+                    try:
+                        await self.bot.delete_message(
+                            chat_id=tg_id,
+                            message_id=time_id
+                        )
+                    except:
+                        pass
 
             steps = self.funnel_db.get_steps(token=token)
             if steps is not None:
@@ -900,15 +925,22 @@ class LivegramBot:
                 text=loading_text
             )
 
-            hours, minutes = self.funnel_db.get_step_time(token=token, step_number=int(callback[4:]))
+            try:
+                hours, minutes = self.funnel_db.get_step_time(token=token, step_number=int(callback[4:]))
+            except TypeError:
+                hours, minutes = self.funnel_db.get_step_time(token=token, step_number=int(callback[4:]))
             step_info = self.funnel_db.get_step_by_number(token=token, step_number=int(callback[4:]))
-            step, audio, photo, video, video_note, document, markup_text, application_name = step_info
+            step, audio, photo, video, video_note, document, document_name, markup_text, application_text, application_button, application_name = step_info
 
             markup = InlineKeyboardMarkup()
+
+            if application_button is None:
+                application_button = "Оставить заявку"
+
             if application_name is not None:
                 markup.add(
                     InlineKeyboardButton(
-                        text="Оставить заявку", callback_data=application_name
+                        text=application_button, callback_data=application_name
                     )
                 )
 
@@ -921,8 +953,13 @@ class LivegramBot:
                     InlineKeyboardButton(
                         text="Удалить данный шаг",
                         callback_data=f"stepdel{callback[4:]}"
+                    )).add(
+                        InlineKeyboardButton(
+                            text="Назад",
+                            callback_data="delete-step"
+                        )
                     )
-                )
+
 
             else:
                 markup.add(
@@ -950,6 +987,7 @@ class LivegramBot:
                 video=video,
                 video_note=video_note,
                 document=document,
+                document_name=document_name,
                 markup=markup
             )
 
@@ -1342,11 +1380,18 @@ class LivegramBot:
                 message=message, token=token, bot=self.bot
             )
             flag = any([text, audio_name, photo_name, video_name, video_note_name, document_name])
-            print("i'm here")
+            # print("i'm here")
 
-            if flag:
+            if len(text) > 800:
+                await self.bot.send_message(
+                    chat_id=chat,
+                    text="Длина сообщения должна не превышать 800 символов, попробуйте снова или вернитесь к настройкам",
+                    reply_markup=back_to_admin_markup
+                )
+
+            elif flag:
                 await BotStates.add_markup.set()
-                print(await state.get_state())
+
                 text = "Теперь настроим кнопки:\n\n" \
                        "Чтобы добавить кнопки пришлите их в формате:\n" \
                        "text - url\n" \
@@ -1355,7 +1400,8 @@ class LivegramBot:
                        "'-' - разделитель\n" \
                        "'&&' - склеить в строку\n\n" \
                        "url может быть ссылкой на другой автоответ бота или ссылкой на сайт\n\n" \
-                       "ЕСЛИ НЕ НУЖНЫ КНОПКИ ОТПРАВЬ 0"
+                       "ЕСЛИ НЕ НУЖНЫ КНОПКИ ОТПРАВЬ 0\n" \
+                       "Кнопки обязательно должны быть через ' - ' с пробелами!"
 
                 await self.bot.send_message(
                     chat_id=chat,
@@ -1461,13 +1507,20 @@ class LivegramBot:
                 )
                 flag = any([text, audio_name, photo_name, video_name, video_note_name, document_name])
 
-                if flag:
+                if len(text) > 800:
+                    await self.bot.send_message(
+                        chat_id=chat,
+                        text="Длина сообщения должна не превышать 800 символов, попробуйте снова или вернитесь к настройкам",
+                        reply_markup=back_to_admin_markup
+                    )
+
+                elif flag:
                     async with state.proxy() as data:
                         data["mode"] = "command"
                         data["message_with_data"] = message
 
                     await BotStates.add_markup.set()
-                    print(await state.get_state())
+
                     text = "Теперь настроим кнопки:\n\n" \
                            "Чтобы добавить кнопки пришлите их в формате:\n" \
                            "text - url\n" \
@@ -1476,7 +1529,8 @@ class LivegramBot:
                            "'-' - разделитель\n" \
                            "'&&' - склеить в строку\n\n" \
                            "url может быть ссылкой на другой автоответ бота или ссылкой на сайт\n\n" \
-                           "ЕСЛИ НЕ НУЖНЫ КНОПКИ ОТПРАВЬ 0"
+                           "ЕСЛИ НЕ НУЖНЫ КНОПКИ ОТПРАВЬ 0\n" \
+                           "Кнопки обязательно должны быть через ' - ' с пробелами!"
 
                     await self.bot.send_message(
                         chat_id=chat,
@@ -1596,7 +1650,7 @@ class LivegramBot:
 
     async def edit_start_message(self, message: Message, state: FSMContext):
         chat = message.chat.id
-        print(message)
+        # print(message)
 
         if message.text == "/start":
             await self.start_handler(message=message, state=state)
@@ -1605,10 +1659,29 @@ class LivegramBot:
             data["message_with_data"] = message
             data["mode"] = "start"
 
+            loading_message = await self.bot.send_message(
+                chat_id=chat,
+                text=loading_text
+            )
+
             text, audio_name, photo_name, video_name, video_note_name, document_name = await files_names(message=message, token=token, bot=self.bot)
             flag = any([text, audio_name, photo_name, video_name, video_note_name, document_name])
+            if len(text) > 800:
+                await self.bot.send_message(
+                    chat_id=chat,
+                    text="Длина сообщения должна не превышать 800 символов, попробуйте снова или вернитесь к настройкам",
+                    reply_markup=back_to_admin_markup
+                )
+                await self.bot.delete_message(
+                    chat_id=chat,
+                    message_id=loading_message.message_id
+                )
 
-            if flag:
+            elif flag:
+                await self.bot.delete_message(
+                    chat_id=chat,
+                    message_id=loading_message.message_id
+                )
                 await BotStates.add_markup.set()
                 text = "Теперь настроим кнопки:\n\n" \
                        "Чтобы добавить кнопки пришлите их в формате:\n" \
@@ -1618,7 +1691,8 @@ class LivegramBot:
                        "'-' - разделитель\n" \
                        "'&&' - склеить в строку\n\n" \
                        "url может быть ссылкой на другой автоответ бота или ссылкой на сайт\n\n" \
-                       "ЕСЛИ НЕ НУЖНЫ КНОПКИ ОТПРАВЬ 0"
+                       "ЕСЛИ НЕ НУЖНЫ КНОПКИ ОТПРАВЬ 0\n" \
+                       "Кнопки обязательно должны быть через ' - ' с пробелами!"
 
                 await self.bot.send_message(
                     chat_id=chat,
@@ -1680,7 +1754,7 @@ class LivegramBot:
 
                 await self.bot.send_message(
                     chat_id=chat,
-                    text="Установлено новое стартовое сообщение!",
+                    text=text,
                     reply_markup=InlineKeyboardMarkup().add(
                         InlineKeyboardButton(
                             text="Вернуться к настройкам бота", callback_data="back-to-admin"
@@ -1731,6 +1805,59 @@ class LivegramBot:
                 )
                 data["sending_message_id"] = sending_message.message_id
 
+    async def add_application_text(self, message: Message, state: FSMContext):
+        chat = message.chat.id
+        text = message.text
+
+        if len(text) <= 800:
+            async with state.proxy() as data:
+                data["application_text"] = message.html_text
+
+            await BotStates.add_application_button.set()
+            await self.bot.send_message(
+                chat_id=chat,
+                text="Назовите кнопку, данный текст будет виден пользователям, ограничения - 15 символов",
+                reply_markup=InlineKeyboardMarkup().add(
+                    InlineKeyboardButton(text="Вернуться к настройкам бота", callback_data="back-to-admin")
+                )
+            )
+
+        elif len(text) > 800:
+            await self.bot.send_message(
+                chat_id=chat,
+                text="Текст не должен превышать 800 символов, попробуйте ещё раз или вернитесь к настройкам бота",
+                reply_markup=InlineKeyboardMarkup().add(
+                    InlineKeyboardButton(text="Вернуться к настройкам бота", callback_data="back-to-admin")
+                )
+            )
+
+    async def add_application_button(self, message: Message, state: FSMContext):
+        chat = message.chat.id
+        text = message.text
+
+        if len(text) <= 15:
+            async with state.proxy() as data:
+                data["application_button"] = text
+
+            await BotStates.add_application_name.set()
+            await self.bot.send_message(
+                chat_id=chat,
+                text="Назовите заявку, это название будет видеть менеджер, когда клиент оставит заявку, ограничение - 25 символов",
+                reply_markup=InlineKeyboardMarkup().add(
+                    InlineKeyboardButton(text="Вернуться к настройкам бота", callback_data="back-to-admin")
+                )
+            )
+
+        elif len(text) > 15:
+            await self.bot.send_message(
+                chat_id=chat,
+                text="Текст не должен превышать 15 символов, попробуйте ещё раз или вернитесь к настройкам бота",
+                reply_markup=InlineKeyboardMarkup().add(
+                    InlineKeyboardButton(text="Вернуться к настройкам бота", callback_data="back-to-admin")
+                )
+            )
+
+
     async def add_application_name(self, message: Message, state: FSMContext):
         chat = message.chat.id
         text = message.text
@@ -1771,9 +1898,16 @@ class LivegramBot:
             mode = data["mode"]
             message_with_data = data["message_with_data"]
             markup_text = data["markup_text"]
-            print(mode)
+            application_text = data.get("application_text")
+            application_button = data.get("application_button")
+            # print(message_with_data.document)
         commands_list = self.db.get_commands_list(bot_token=token)
         markup = InlineKeyboardMarkup()
+
+        loading_message = await self.bot.send_message(
+            chat_id=chat,
+            text=loading_text
+        )
 
         if LMI is not None:
             await self.bot.delete_message(
@@ -1795,18 +1929,23 @@ class LivegramBot:
                 video_note_name=video_note_name,
                 document_name=document_name,
                 markup_text=markup_text,
+                application_text=application_text,
+                application_button=application_button,
                 application_name=application_name
             )
 
-            greeting, audio, photo, video, video_note, document, markup_text, application_name = self.db.start_message(
+            greeting, audio, photo, video, video_note, document, document_name, markup_text, application_text, application_button, application_name = self.db.start_message(
                 method="get",
                 bot_token=token
             )
 
+            if application_button is None:
+                application_button = "Оставить заявку"
+
             if application_name is not None:
                 markup.add(
                     InlineKeyboardButton(
-                        text="Оставить заявку", callback_data=application_name
+                        text=application_button, callback_data=application_name
                     )
                 )
 
@@ -1821,6 +1960,7 @@ class LivegramBot:
                 video=video,
                 video_note=video_note,
                 document=document,
+                document_name=document_name,
                 markup=markup
             )
 
@@ -1829,6 +1969,11 @@ class LivegramBot:
                 data["sending_message_id"] = sending_message.message_id
 
             await BotStates.bot_settings.set()
+
+            await self.bot.delete_message(
+                chat_id=chat,
+                message_id=loading_message.message_id
+            )
 
             await self.bot.send_message(
                 chat_id=chat,
@@ -1856,13 +2001,18 @@ class LivegramBot:
                 video_note_name=video_note_name,
                 document_name=document_name,
                 markup_text=markup_text,
+                application_text=application_text,
+                application_button=application_button,
                 application_name=application_name
             )
+
+            if application_button is None:
+                application_button = "Оставить заявку"
 
             if application_name is not None:
                 markup.add(
                     InlineKeyboardButton(
-                        text="Оставить заявку", callback_data=application_name.replace(" ", "%")
+                        text=application_button, callback_data=application_name.replace(" ", "%")
                     )
                 )
 
@@ -1871,7 +2021,7 @@ class LivegramBot:
             commands_dict = self.db.get_commands_with_descriptions(bot_token=token)
             for command in commands_dict:
                 if command == title:
-                    description, audio, photo, video, video_note, document, markup_text, application_name = commands_dict[command]
+                    description, audio, photo, video, video_note, document, document_name, markup_text, application_text, application_button, application_name = commands_dict[command]
                     sending_message = await sending_function(
                         bot=self.bot,
                         chat_id=chat,
@@ -1881,6 +2031,7 @@ class LivegramBot:
                         video=video,
                         video_note=video_note,
                         document=document,
+                        document_name=document_name,
                         markup=markup
                     )
 
@@ -1890,10 +2041,15 @@ class LivegramBot:
                 try:
                     data["sending_message_id"] = sending_message.message_id
                 except Exception as e:
-                    print(e, 1892)
+                    print(e, 1988)
                 data["user_message_id"] = message_with_data.message_id
 
             await BotStates.bot_settings.set()
+
+            await self.bot.delete_message(
+                chat_id=chat,
+                message_id=loading_message.message_id
+            )
 
             await self.bot.send_message(
                 chat_id=chat,
@@ -1923,6 +2079,8 @@ class LivegramBot:
                     audio_name=audio_name, photo_name=photo_name,
                     video_name=video_name, video_note_name=video_note_name,
                     document_name=document_name, markup_text=markup_text,
+                    application_text=application_text,
+                    application_button=application_button,
                     application_name=application_name
                 )
 
@@ -1930,6 +2088,11 @@ class LivegramBot:
                     chat_id=chat,
                     text=f"Теперь через это количество часов и минут: {hours}/{minutes} после срабатывания триггера будет отправляться этот шаг"
                 )
+
+            await self.bot.delete_message(
+                chat_id=chat,
+                message_id=loading_message.message_id
+            )
 
             await BotStates.bot_settings.set()
             bot_info = await Bot(token).me
@@ -1948,15 +2111,12 @@ class LivegramBot:
                 reply_markup=funnel_steps_markup,
             )
 
-
-
-
     async def add_markup(self, message: Message, state: FSMContext):
         text = message.text
         tg_id = message.from_user.id
-        print(message)
-        print(text)
-        if "-" in text or text == "0":
+        # print(message)
+        # print(text)
+        if " - " in text or text == "0":
             async with state.proxy() as data:
                 data["markup_text"] = text
 
@@ -1971,6 +2131,12 @@ class LivegramBot:
                 ).add(InlineKeyboardButton(
                     text="Нет", callback_data="don't_add_application"
                 ))
+            )
+
+        else:
+            await self.bot.send_message(
+                chat_id=tg_id,
+                text="Кнопки обязательно должны быть через ' - ' с пробелами!"
             )
 
 
@@ -1998,10 +2164,14 @@ class LivegramBot:
 
     async def add_step_handler(self, message: Message, state: FSMContext):
         tg_id = message.from_user.id
-        print(message)
+        chat = message.from_user.id
         async with state.proxy() as data:
             token = data["token"]
 
+        loading_message = await self.bot.send_message(
+            chat_id=tg_id,
+            text=loading_text
+        )
 
         text, audio_name, photo_name, video_name, video_note_name, document_name = await files_names(
             message=message, token=token, bot=self.bot
@@ -2009,12 +2179,19 @@ class LivegramBot:
 
         flag = any([text, audio_name, photo_name, video_name, video_note_name, document_name])
 
-        if flag:
-            loading_message = await self.bot.send_message(
-                chat_id=tg_id,
-                text=loading_text
+        if len(text) > 800:
+            await self.bot.send_message(
+                chat_id=chat,
+                text="Длина сообщения должна не превышать 800 символов, попробуйте снова или вернитесь к настройкам",
+                reply_markup=back_to_funnel_settings
             )
 
+            await self.bot.delete_message(
+                chat_id=chat,
+                message_id=loading_message.message_id
+            )
+
+        elif flag:
             async with state.proxy() as data:
                 data["message_with_data"] = message
                 # data["photo_name"] = photo_name
@@ -2056,6 +2233,10 @@ class LivegramBot:
                      "Или вернитесь в меню настроек"
             )
 
+            await self.bot.delete_message(
+                chat_id=tg_id,
+                message_id=loading_message.message_id
+            )
 
     async def add_time_handler(self, message: Message, state: FSMContext):
         tg_id = message.from_user.id
@@ -2281,7 +2462,9 @@ class LivegramBot:
         self.dp.register_message_handler(callback=self.add_step_handler, content_types=ContentTypes.ANY, state=FunnelStates.add_step)
         self.dp.register_message_handler(callback=self.add_trigger_handler, content_types=ContentTypes.TEXT, state=FunnelStates.add_trigger)
         self.dp.register_callback_query_handler(callback=self.callback_handler, state="*")
-        self.dp.register_message_handler(callback=self.add_markup, content_types=ContentTypes.TEXT, state=BotStates.add_markup),
+        self.dp.register_message_handler(callback=self.add_markup, content_types=ContentTypes.TEXT, state=BotStates.add_markup)
+        self.dp.register_message_handler(callback=self.add_application_text, content_types=ContentTypes.TEXT, state=BotStates.add_application_text)
+        self.dp.register_message_handler(callback=self.add_application_button, content_types=ContentTypes.TEXT, state=BotStates.add_application_button)
         self.dp.register_message_handler(callback=self.add_application_name, state=BotStates.add_application_name, content_types=ContentTypes.TEXT)
         self.dp.register_message_handler(callback=self.add_command_state_handler, content_types=ContentTypes.TEXT,
                                          state=BotStates.add_command)

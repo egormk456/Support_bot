@@ -44,10 +44,12 @@ class MyBot:
         text = message.text
         funnel_text = message.html_text
 
+
         if call is not None:
             username = message.chat.username
             tg_id = chat = message.chat.id
         #print(message)
+
         self.trigger = self.funnel_db.get_trigger(token=self.bot_token)
         self.funnel_users = self.funnel_db.get_users(token=self.bot_token)
         self.funnel_users = [user[0] for user in self.funnel_users]
@@ -74,15 +76,23 @@ class MyBot:
             if self.trigger is not None and tg_id not in self.funnel_users and self.trigger.lower() == funnel_text.lower():
                 self.funnel_db.add_or_update_user(token=self.bot_token, tg_id=tg_id, trigger_time=f"{datetime.now().hour * 60 + datetime.now().minute} {datetime.now().day}")
 
-            greeting, audio, photo, video, video_note, document, markup_text, application_name = self.db.start_message(method="get", bot_token=self.bot_token)
+            greeting, audio, photo, video, video_note, document, document_name, markup_text, application_text, application_button, application_name = self.db.start_message(method="get", bot_token=self.bot_token)
+
+            if application_button is None:
+                application_button = "Оставить заявку"
 
             markup = InlineKeyboardMarkup()
             if application_name is not None:
                 markup.add(
                     InlineKeyboardButton(
-                        text="Оставить заявку", callback_data=application_name
+                        text=application_button, callback_data=application_name
                     )
                 )
+
+            loading_message = await self.bot.send_message(
+                chat_id=chat,
+                text=loading_text
+            )
 
             commands_list = self.db.get_commands_list(bot_token=self.bot_token)
             if markup_text != "0":
@@ -97,7 +107,13 @@ class MyBot:
                 video=video,
                 video_note=video_note,
                 document=document,
+                document_name=document_name,
                 markup=markup
+            )
+
+            await self.bot.delete_message(
+                chat_id=chat,
+                message_id=loading_message.message_id
             )
 
             if tg_id not in users:
@@ -205,7 +221,7 @@ class MyBot:
     async def commands(self, message: Message, state: FSMContext, call=None):
         chat = message.chat.id
         m_id = message.message_id
-        funnel_text = message.html_text
+        funnel_text = message.text
 
         if call is not None:
             username = message.chat.username
@@ -220,10 +236,7 @@ class MyBot:
             self.trigger = self.funnel_db.get_trigger(token=self.bot_token)
             self.funnel_users = self.funnel_db.get_users(token=self.bot_token)
             self.funnel_users = [user[0] for user in self.funnel_users]
-
-            if funnel_text is not None and funnel_text[0] == "/":
-                funnel_text = funnel_text[1:]
-
+            print(chat, self.funnel_users, self.trigger, funnel_text)
             if self.trigger is not None and chat not in self.funnel_users and self.trigger.lower() == funnel_text.lower():
                 self.funnel_db.add_or_update_user(token=self.bot_token, tg_id=chat,
                                                   trigger_time=f"{datetime.now().hour * 60 + datetime.now().minute} {datetime.now().day}")
@@ -238,13 +251,16 @@ class MyBot:
 
                 self.db.add_user_message(tg_id=chat, message_id=message_to_chat.message_id, bot_token=self.bot_token)
             commands_dict = self.db.get_commands_with_descriptions(bot_token=self.bot_token)
-            description, audio, photo, video, video_note, document, markup_text, application_name = commands_dict[message.text]
+            description, audio, photo, video, video_note, document, document_name, markup_text, application_text, application_button, application_name = commands_dict[message.text]
+
+            if application_button is None:
+                application_button = "Оставить заявку"
 
             markup = InlineKeyboardMarkup()
             if application_name is not None:
                 markup.add(
                     InlineKeyboardButton(
-                        text="Оставить заявку", callback_data=application_name
+                        text=application_button, callback_data=application_name
                     )
                 )
 
@@ -261,6 +277,7 @@ class MyBot:
                 video=video,
                 video_note=video_note,
                 document=document,
+                document_name=document_name,
                 markup=markup
             )
 
@@ -298,8 +315,11 @@ class MyBot:
         commands_list = self.db.get_commands_list(bot_token=self.bot_token)
         commands_dict = self.db.get_commands_with_descriptions(bot_token=self.bot_token)
         print(call)
+        if not call.message.chat.type == "private":
+            return
+
         if callback != "/start" and callback not in applications_names_list:
-            description, audio, photo, video, video_note, document, markup_text, application_name = commands_dict[callback]
+            description, audio, photo, video, video_note, document, document_name, markup_text, application_text, application_button, application_name = commands_dict[callback]
 
         if callback == "back-to-admin":
             await self.dp.bot.delete_message(
@@ -332,17 +352,20 @@ class MyBot:
             #     message_id=m_id
             # )
 
-            await self.bot.send_message(
+            message_to_chat = await self.bot.send_message(
                 chat_id=self.group_id,
                 text=f"Новая заявка по теме: <b>{callback}</b>\n"
                      f"От: @{username}",
                 parse_mode="html",
                 reply_to_message_id=self.db.get_post_id(tg_id=chat, bot_token=self.bot_token)
             )
+            self.db.add_user_message(tg_id=chat, message_id=message_to_chat.message_id, bot_token=self.bot_token)
 
+            application_text = self.db.get_application_text(application_name=callback, token=self.bot_token)
             await self.bot.send_message(
                 chat_id=chat,
-                text="Заявка отправлена, ближайшее время с вами свяжется менеджер"
+                text=application_text,
+                parse_mode="html"
             )
 
     async def mailing_state_handler(self, message: Message, state: FSMContext):

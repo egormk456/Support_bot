@@ -33,8 +33,8 @@ async def files_names(message, token, bot):
         file_path = file.file_path
 
         if file_path.endswith(".pdf"):
-            await message.document.download(f"files/document/{token}document.pdf")
-            document_name = f"files/document/{token}document.pdf"
+            await message.document.download(f"files/document/{message.document.file_name}")
+            document_name = f"files/document/{message.document.file_name}"
 
             if message.caption:
                 text = message.html_text

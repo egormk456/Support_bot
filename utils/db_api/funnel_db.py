@@ -30,7 +30,6 @@ class FunnelDatabase:
         self.cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS triggers(
-                tg_id INTEGER,
                 token TEXT,
                 trigger TEXT
             )
@@ -40,7 +39,6 @@ class FunnelDatabase:
         self.cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS steps(
-                tg_id INTEGER,
                 token TEXT,
                 step TEXT,
                 minutes INTEGER,
@@ -50,7 +48,10 @@ class FunnelDatabase:
                 video BLOB,
                 video_note BLOB,
                 document BLOB,
-                markup_text TEXT, 
+                document_name TEXT,
+                markup_text TEXT,
+                application_text TEXT,
+                application_button TEXT,
                 application_name TEXT
             )
             """
@@ -147,30 +148,32 @@ class FunnelDatabase:
             self.cursor.execute(
                 f"""
                 INSERT OR REPLACE INTO triggers
-                (tg_id, token, trigger)
+                (token, trigger)
                 VALUES
-                ({tg_id}, '{token}', '{trigger}');
+                ('{token}', '{trigger}');
                 """
             )
 
         self.connection.commit()
 
     def add_step(self, tg_id: int, token: str, step: str, minutes: int, audio_name=None, photo_name=None, video_note_name=None, video_name=None, document_name=None,
-                 markup_text="0", application_name=None):
+                 markup_text="0", application_text=None, application_button=None, application_name=None):
         step_number = self.get_steps_length(token=token)
 
         audio_reader, photo_reader, video_reader, video_note_reader, document_reader = open_files(
             audio_name, photo_name, video_name, video_note_name, document_name
         )
 
-        info = (tg_id, token, step, minutes, step_number + 1, audio_reader, photo_reader, video_reader, video_note_reader, document_reader, markup_text, application_name)
+        if document_name is not None:
+            document_name = document_name[15:-4]
+        info = (token, step, minutes, step_number + 1, audio_reader, photo_reader, video_reader, video_note_reader, document_reader, document_name, markup_text, application_text, application_button, application_name)
         #print(info)
         self.cursor.execute(
             f"""
             INSERT OR REPLACE INTO steps
-            (tg_id, token, step, minutes, step_number, audio, photo, video, video_note, document, markup_text, application_name)
+            (token, step, minutes, step_number, audio, photo, video, video_note, document, document_name, markup_text, application_text, application_button, application_name)
             VALUES
-            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             info
         )
@@ -207,7 +210,7 @@ class FunnelDatabase:
     def get_steps_info(self, token: str):
         steps_info = self.cursor.execute(
             f"""
-            SELECT step, minutes, step_number, audio, photo, video, video_note, document, markup_text, application_name FROM steps
+            SELECT step, minutes, step_number, audio, photo, video, video_note, document, document_name, markup_text, application_text, application_button, application_name FROM steps
             WHERE token='{token}'
             """
         ).fetchall()
@@ -220,7 +223,7 @@ class FunnelDatabase:
     def get_step_by_number(self, token: str, step_number: int):
         step_info = self.cursor.execute(
             f"""
-            SELECT step, audio, photo, video, video_note, document, markup_text, application_name FROM steps
+            SELECT step, audio, photo, video, video_note, document, document_name, markup_text, application_text, application_button, application_name FROM steps
             WHERE step_number={step_number}
             AND token='{token}'
             """
@@ -257,8 +260,8 @@ class FunnelDatabase:
         self.connection.commit()
 
         self.minus_steps(token=token, step_number=step_number)
-        self.minus_step_number(token=token, step_number=step_number)
-
+        # self.minus_step_number(token=token, step_number=step_number)
+        self.edit_steps_time(token=token, time=123123123, tg_id=0, deleting=True)
 
     def minus_step_number(self, token: str, step_number: int):
         step = self.get_step_by_number(token=token, step_number=step_number + 1)
@@ -311,6 +314,7 @@ class FunnelDatabase:
                     self.connection.commit()
 
     def get_step_time(self, token: str, step_number: int):
+        print(step_number)
         time = self.cursor.execute(
             f"""
             SELECT minutes FROM steps
@@ -319,14 +323,18 @@ class FunnelDatabase:
             """
         ).fetchone()
 
-        time = time[0]
+        try:
+            time = time[0]
 
-        hours = time // 60
-        minutes = time % 60
+            hours = time // 60
+            minutes = time % 60
 
-        return hours, minutes
+            return hours, minutes
 
-    def edit_steps_time(self, token: str, tg_id: int, time: int):
+        except:
+            return None
+
+    def edit_steps_time(self, token: str, tg_id: int, time: int, deleting=None):
         step_info = self.get_steps_info(token=token)
         #print(step_info)
         sorted_info = sorted(step_info, key=lambda x: x[1])
@@ -340,23 +348,25 @@ class FunnelDatabase:
         )
 
         num = 1
-        for elem in sorted_info:
-            if elem[1] == time:
-                self.add_user_number(token=token, new_step_number=num)
-                break
-            num += 1
+
+        if deleting is None:
+            for elem in sorted_info:
+                if elem[1] == time:
+                    self.add_user_number(token=token, new_step_number=num)
+                    break
+                num += 1
 
         count = 1
-        for step, minutes, step_number, audio, photo, video, video_note, document, markup_text, application_name in sorted_info:
-            info = (tg_id, token, step, minutes, count, audio, photo, video, video_note, document, markup_text, application_name)
+        for step, minutes, step_number, audio, photo, video, video_note, document, document_name, markup_text, application_text, application_button, application_name in sorted_info:
+            info = (token, step, minutes, count, audio, photo, video, video_note, document, document_name, markup_text, application_text, application_button, application_name)
             print(info)
 
             self.cursor.execute(
                 f"""
                 INSERT INTO steps
-                (tg_id, token, step, minutes, step_number, audio, photo, video, video_note, document, markup_text, application_name)
+                (token, step, minutes, step_number, audio, photo, video, video_note, document, document_name, markup_text, application_text, application_button, application_name)
                 VALUES
-                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
                 info
             )

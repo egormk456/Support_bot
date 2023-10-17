@@ -9,7 +9,7 @@ back_to_menu_markup.add(InlineKeyboardButton(text="Назад", callback_data="b
 
 
 back_to_funnel_settings = InlineKeyboardMarkup()
-back_to_funnel_settings.add(InlineKeyboardButton(text="Назад", callback_data="back-to-fs"))
+back_to_funnel_settings.add(InlineKeyboardButton(text="Назад", callback_data="funnel-settings"))
 
 
 back_to_funnel_steps = InlineKeyboardMarkup()
